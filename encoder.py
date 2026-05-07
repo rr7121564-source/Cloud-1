@@ -27,9 +27,9 @@ RENAME = os.getenv("RENAME", "output.mp4")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
 THREAD_ID = os.getenv("THREAD_ID", "none")
 
-# User Settings from Payload
-CRF = os.getenv("CRF", "34")
-PRESET = os.getenv("PRESET", "ultrafast")
+# Initial Defaults
+CRF = "34"
+PRESET = "ultrafast"
 
 raw_dump = os.getenv("DUMP_ID", "none")
 STATUS_MSG_ID = None
@@ -37,15 +37,17 @@ RESOLUTION = "original"
 ORIG_NAME = RENAME
 VIDEO_MSG_ID = None
 
+# Extracting all packed variables from dump_id string
 if ":::" in raw_dump:
     parts = raw_dump.split(":::")
     DUMP_ID = parts[0]
-    if len(parts) > 1: LOGO_ID = parts[1]
-    else: LOGO_ID = "none"
-    if len(parts) > 2: STATUS_MSG_ID = parts[2]
-    if len(parts) > 3: RESOLUTION = parts[3]
-    if len(parts) > 4: ORIG_NAME = parts[4]
-    if len(parts) > 5: VIDEO_MSG_ID = parts[5]
+    LOGO_ID = parts[1] if len(parts) > 1 else "none"
+    STATUS_MSG_ID = parts[2] if len(parts) > 2 else None
+    RESOLUTION = parts[3] if len(parts) > 3 else "original"
+    ORIG_NAME = parts[4] if len(parts) > 4 else RENAME
+    VIDEO_MSG_ID = parts[5] if len(parts) > 5 else None
+    CRF = parts[6] if len(parts) > 6 else "34"
+    PRESET = parts[7] if len(parts) > 7 else "ultrafast"
 else:
     DUMP_ID, LOGO_ID = raw_dump, "none"
 
