@@ -75,10 +75,22 @@ async def generate_screenshots(file_path, num_screens, output_folder):
     os.makedirs(output_folder, exist_ok=True)
     images =[]
     
+    cmd_probe =['ffprobe', '-v', 'error', '-select_streams', 's', '-show_entries', 'stream=index', '-of', 'csv=p=0', file_path]
+    proc_probe = await asyncio.create_subprocess_exec(*cmd_probe, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    stdout, _ = await proc_probe.communicate()
+    has_subs = bool(stdout.strip())
+    
+    abs_file = os.path.abspath(file_path).replace('\\', '/').replace(':', '\\:').replace("'", r"\'")
+    
     for i in range(1, num_screens + 1):
         timestamp = interval * i
         out_path = os.path.join(output_folder, f"screen_{i}.jpg")
-        cmd =['ffmpeg', '-y', '-ss', str(timestamp), '-i', file_path, '-vframes', '1', '-q:v', '2', out_path]
+        
+        if has_subs:
+            cmd =['ffmpeg', '-y', '-ss', str(timestamp), '-copyts', '-i', file_path, '-vf', f"subtitles='{abs_file}'", '-vframes', '1', '-q:v', '2', out_path]
+        else:
+            cmd =['ffmpeg', '-y', '-ss', str(timestamp), '-i', file_path, '-vframes', '1', '-q:v', '2', out_path]
+            
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
         await proc.communicate()
         if os.path.exists(out_path):
@@ -94,7 +106,7 @@ async def mux_video(mkv_path, sub_path, output_path, chat_id, status_msg, file_n
         for idx, f in enumerate(os.listdir(task_fonts_dir)):
             fp = os.path.join(task_fonts_dir, f)
             ext = os.path.splitext(f)[1].lower()
-            mtype = "application/x-truetype-font" if ext in ['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
+            mtype = "application/x-truetype-font" if ext in['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
             if mtype: font_args.extend(["-attach", fp, f"-metadata:s:t:{idx}", f"mimetype={mtype}"])
 
     sub_ext = os.path.splitext(sub_path)[1].lower()
