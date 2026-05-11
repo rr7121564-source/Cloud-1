@@ -30,13 +30,8 @@ THREAD_ID = os.getenv("THREAD_ID", "none")
 raw_dump = os.getenv("DUMP_ID", "none")
 STATUS_MSG_ID = None
 
-# Default Profile Variables
-CODEC = "libx264"
 CRF = "34"
 PRESET = "ultrafast"
-POS = "Center"
-SIZE = "10"
-MARGIN = "10"
 RESOLUTION = "original"
 ORIG_NAME = RENAME
 VIDEO_MSG_ID = None
@@ -51,13 +46,9 @@ if ":::" in raw_dump:
     ORIG_NAME = parts[4] if len(parts) > 4 else RENAME
     VIDEO_MSG_ID = parts[5] if len(parts) > 5 else None
     
-    CODEC = parts[6] if len(parts) > 6 and parts[6] != "none" else CODEC
-    CRF = parts[7] if len(parts) > 7 and parts[7] != "none" else CRF
-    PRESET = parts[8] if len(parts) > 8 and parts[8] != "none" else PRESET
-    POS = parts[9] if len(parts) > 9 and parts[9] != "none" else POS
-    SIZE = parts[10] if len(parts) > 10 and parts[10] != "none" else SIZE
-    MARGIN = parts[11] if len(parts) > 11 and parts[11] != "none" else MARGIN
-    raw_fonts = parts[12] if len(parts) > 12 and parts[12] != "none" else ""
+    CRF = parts[6] if len(parts) > 6 and parts[6] != "none" else "34"
+    PRESET = parts[7] if len(parts) > 7 and parts[7] != "none" else "ultrafast"
+    raw_fonts = parts[8] if len(parts) > 8 and parts[8] != "none" else ""
     if raw_fonts: FONT_IDS = raw_fonts.split(",")
 else:
     DUMP_ID = raw_dump
@@ -190,7 +181,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         if target_h:
             cmd.extend(['-vf', f'scale=-2:{target_h}'])
         cmd.extend([
-            '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
+            '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
             '-progress', 'pipe:1', output
         ])
 
@@ -233,24 +224,13 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
                 filter_complex.append(f"{current_v}subtitles=filename='{abs_sub}'[subbed]")
             current_v = "[subbed]"
 
-        if logo_path and LOGO_ID != "none" and POS != "none":
+        if logo_path and LOGO_ID != "none":
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            s = float(SIZE) / 100
-            m = float(MARGIN) / 100
-
-            filter_complex.append(f"[1:v]{current_v}scale2ref=w='iw*{s}':h='ow*ih/iw'[logo][main]")
-
-            if POS == "Top Left": overlay = f"x=W*{m}:y=H*{m}"
-            elif POS == "Top Right": overlay = f"x=W-w-(W*{m}):y=H*{m}"
-            elif POS == "Bottom Left": overlay = f"x=W*{m}:y=H-h-(H*{m})"
-            elif POS == "Bottom Right": overlay = f"x=W-w-(W*{m}):y=H-h-(H*{m})"
-            else: overlay = f"x=(W-w)/2:y=(H-h)/2"
-
-            filter_complex.append(f"[main][logo]overlay={overlay}[outv]")
+            filter_complex.append(f"[1:v]scale=120:-1[logo];{current_v}[logo]overlay=main_w-overlay_w-15:15[outv]")
             current_v = "[outv]"
 
         cmd =['ffmpeg', '-y', '-i', video_path]
-        if logo_path and LOGO_ID != "none" and POS != "none":
+        if logo_path and LOGO_ID != "none":
             cmd.extend(['-i', abs_logo])
 
         if filter_complex:
@@ -259,7 +239,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         else:
             cmd.extend(['-map', '0:v', '-map', '0:a?'])
 
-        cmd.extend(['-sn', '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-progress', 'pipe:1', output])
+        cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-progress', 'pipe:1', output])
 
     proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     start_time = time.time()
@@ -356,7 +336,7 @@ async def upload_phase(app, output, returncode, msg_id):
                 )
                 if target_chat != CHAT_ID:
                     await app.send_message(CHAT_ID, sc("Kᴀᴀᴍ ʜᴏ ɢᴀʏᴀ! Fɪʟᴇ ᴀᴀᴘᴋᴏ ʙʜᴇᴊ ᴅɪ ɢᴀʏɪ ʜᴀɪ! ❤️"))
-                await app.delete_messages(CHAT_ID, [msg_id])
+                await app.delete_messages(CHAT_ID,[msg_id])
             except Exception as inner_e:
                 try:
                     await app.edit_message_text(CHAT_ID, msg_id, sc(f"❌ Uᴘʟᴏᴀᴅ Eʀʀᴏʀ: {str(inner_e)}"))
