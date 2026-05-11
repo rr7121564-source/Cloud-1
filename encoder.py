@@ -186,85 +186,84 @@ async def encode_phase(video_path, sub_path, logo_path, msg_id):
     duration = await get_duration(video_path)
     os.makedirs("fonts", exist_ok=True)
     
-    if TASK_TYPE == "hardsub":
-        res_map = {"1080p": 1080, "720p": 720, "480p": 480}
-        target_h = res_map.get(RESOLUTION, 1080) if RESOLUTION != "original" else None
-        
-        abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace("'", r"\'").replace(':', '\\:') if sub_path else ""
-        fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
-        
-        filter_complex =[]
+    res_map = {"1080p": 1080, "720p": 720, "480p": 480}
+    
+    if TASK_TYPE == "compress":
+        target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
+        cmd =['ffmpeg', '-y', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
         if target_h:
-            if abs_sub:
-                filter_complex.append(f"[0:v]scale=-2:{target_h},subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
-            else:
-                filter_complex.append(f"[0:v]scale=-2:{target_h}[subbed]")
-        else:
-            if abs_sub:
-                filter_complex.append(f"[0:v]subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
-            else:
-                filter_complex.append(f"[0:v]copy[subbed]") 
+            cmd.extend(['-vf', f'scale=-2:{target_h}'])
+        cmd.extend([
+            '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
+            '-progress', 'pipe:1', output
+        ])
 
-        if logo_path:
-            abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            s = float(SIZE) / 100
-            m = float(MARGIN) / 100
-            
-            # Using ih/iw to strictly preserve logo aspect ratio dynamically
-            filter_complex.append(f"[1:v][subbed]scale2ref=w='main_w*{s}':h='ow*ih/iw'[logo][main]")
-            
-            if POS == "Top Left": overlay = f"x=W*{m}:y=H*{m}"
-            elif POS == "Top Right": overlay = f"x=W-w-(W*{m}):y=H*{m}"
-            elif POS == "Bottom Left": overlay = f"x=W*{m}:y=H-h-(H*{m})"
-            elif POS == "Bottom Right": overlay = f"x=W-w-(W*{m}):y=H-h-(H*{m})"
-            else: overlay = f"x=(W-w)/2:y=(H-h)/2"
-            
-            filter_complex.append(f"[main][logo]overlay={overlay}[outv]")
-            
-            cmd =[
-                'ffmpeg', '-y', '-i', video_path, '-i', abs_logo,
-                '-filter_complex', ";".join(filter_complex),
-                '-map', '[outv]', '-map', '0:a?', '-sn',
-                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
-                '-progress', 'pipe:1', output
-            ]
-        else:
-            cmd =[
-                'ffmpeg', '-y', '-i', video_path,
-                '-filter_complex', filter_complex[0].replace('[subbed]', '[outv]'),
-                '-map', '[outv]', '-map', '0:a?', '-sn',
-                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
-                '-progress', 'pipe:1', output
-            ]
-    else:
+    elif TASK_TYPE == "mux":
         font_args =[]
         if os.path.exists("fonts"):
             for idx, f in enumerate(os.listdir("fonts")):
                 fp = os.path.join("fonts", f)
                 if not os.path.isfile(fp): continue
                 ext = os.path.splitext(f)[1].lower()
-                mtype = "application/x-truetype-font" if ext in ['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
+                mtype = "application/x-truetype-font" if ext in['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
                 if mtype: font_args.extend(["-attach", fp, f"-metadata:s:t:{idx}", f"mimetype={mtype}"])
+        
+        sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
+        cmd =[
+            'ffmpeg', '-y', '-i', video_path, '-i', sub_path,
+            '-map', '0:v', '-map', '0:a?', '-map', '1:0',
+            '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
+            '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
+        ] + font_args +['-progress', 'pipe:1', output]
 
-        if TASK_TYPE == "mux":
-            sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
-            cmd =[
-                'ffmpeg', '-y', '-i', video_path, '-i', sub_path,
-                '-map', '0:v', '-map', '0:a?', '-map', '1:0',
-                '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
-                '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
-            ] + font_args +['-progress', 'pipe:1', output]
-        else:
-            res_map = {"1080p": 1080, "720p": 720, "480p": 480}
-            target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
-            vf_scale = f"-vf scale=-2:{target_h}" if target_h else ""
+    else:
+        # hardsub mode
+        target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
+        filter_complex = []
+        current_v = "[0:v]"
+
+        if target_h:
+            filter_complex.append(f"{current_v}scale=-2:{target_h}[scaled]")
+            current_v = "[scaled]"
+
+        if sub_path:
+            abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
+            fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
+            has_fonts = any(f.lower().endswith(('.ttf','.otf')) for f in os.listdir("fonts")) if os.path.exists("fonts") else False
             
-            cmd =['ffmpeg', '-y', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
-            if vf_scale: cmd.extend(['-vf', f'scale=-2:{target_h}'])
-            cmd.extend([
-                '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
-                '-progress', 'pipe:1', output
-            ])
+            if has_fonts:
+                filter_complex.append(f"{current_v}subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
+            else:
+                filter_complex.append(f"{current_v}subtitles=filename='{abs_sub}'[subbed]")
+            current_v = "[subbed]"
+
+        if logo_path and LOGO_ID != "none" and POS != "none":
+            abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
+            s = float(SIZE) / 100
+            m = float(MARGIN) / 100
+
+            filter_complex.append(f"[1:v]{current_v}scale2ref=w='iw*{s}':h='ow/dar'[logo][main]")
+
+            if POS == "Top Left": overlay = f"x=W*{m}:y=H*{m}"
+            elif POS == "Top Right": overlay = f"x=W-w-(W*{m}):y=H*{m}"
+            elif POS == "Bottom Left": overlay = f"x=W*{m}:y=H-h-(H*{m})"
+            elif POS == "Bottom Right": overlay = f"x=W-w-(W*{m}):y=H-h-(H*{m})"
+            else: overlay = f"x=(W-w)/2:y=(H-h)/2"
+
+            filter_complex.append(f"[main][logo]overlay={overlay}[outv]")
+            current_v = "[outv]"
+
+        cmd =['ffmpeg', '-y', '-i', video_path]
+        if logo_path and LOGO_ID != "none" and POS != "none":
+            cmd.extend(['-i', abs_logo])
+
+        if filter_complex:
+            cmd.extend(['-filter_complex', ";".join(filter_complex)])
+            cmd.extend(['-map', current_v, '-map', '0:a?'])
+        else:
+            cmd.extend(['-map', '0:v', '-map', '0:a?'])
+
+        cmd.extend(['-sn', '-c:v', CODEC, '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-progress', 'pipe:1', output])
 
     app = Client("worker_enc", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
     await app.start()
