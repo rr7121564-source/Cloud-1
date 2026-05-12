@@ -173,7 +173,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
     
     if TASK_TYPE == "compress":
         target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
-        cmd =['ffmpeg', '-y', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
+        cmd =['ffmpeg', '-y', '-fflags', '+genpts', '-i', video_path, '-map', '0:v', '-map', '0:a?', '-map', '0:s?']
         if target_h:
             cmd.extend(['-vf', f'scale=-2:{target_h}'])
         cmd.extend([
@@ -193,7 +193,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         
         sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
         cmd =[
-            'ffmpeg', '-y', '-i', video_path, '-i', sub_path,
+            'ffmpeg', '-y', '-fflags', '+genpts', '-i', video_path, '-i', sub_path,
             '-map', '0:v', '-map', '0:a?', '-map', '1:0',
             '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
             '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
@@ -221,23 +221,11 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
 
         if logo_path and LOGO_ID != "none":
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            filter_complex.append(
-    f"[1:v]{current_v}scale2ref="
-    f"w='main_w*0.10':"
-    f"h='ow/mdar':"
-    f"force_original_aspect_ratio=decrease"
-    f"[logo][main]"
-)
-
-filter_complex.append(
-    f"[main][logo]overlay="
-    f"x=main_w-overlay_w-15:"
-    f"y=15"
-    f"[outv]"
-)
+            filter_complex.append(f"[1:v]{current_v}scale2ref=w='iw*0.1':h='ow/a'[logo][main]")
+            filter_complex.append(f"[main][logo]overlay=main_w-overlay_w-15:15[outv]")
             current_v = "[outv]"
 
-        cmd =['ffmpeg', '-y', '-i', video_path]
+        cmd =['ffmpeg', '-y', '-fflags', '+genpts', '-i', video_path]
         if logo_path and LOGO_ID != "none":
             cmd.extend(['-i', abs_logo])
 
