@@ -130,12 +130,12 @@ async def download_phase(app):
     
     dl_start_time = time.time()
     video_path = await app.download_media(
-        VIDEO_ID, file_name="video.mp4", 
+        VIDEO_ID, file_name="video.mkv", 
         progress=progress_bar, progress_args=(app, msg_id, "Downloading Video", ORIG_NAME, dl_start_time)
     )
     
     sub_path = None
-    if TASK_TYPE in ["hardsub", "mux"] and SUB_ID != "none":
+    if TASK_TYPE == "hardsub" and SUB_ID != "none":
         sub_start_time = time.time()
         sub_path = await app.download_media(
             SUB_ID, 
@@ -165,25 +165,7 @@ async def download_phase(app):
     return video_path, sub_path, logo_path, msg_id
 
 async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
-    # 1. SAFE RENAMING: Eliminates path escaping and special character crashes
-    if video_path and os.path.exists(video_path):
-        safe_video = "safe_video" + os.path.splitext(video_path)[1]
-        os.rename(video_path, safe_video)
-        video_path = safe_video
-        
-    if sub_path and os.path.exists(sub_path):
-        safe_sub = "safe_subtitle" + os.path.splitext(sub_path)[1]
-        os.rename(sub_path, safe_sub)
-        sub_path = safe_sub
-        
-    if logo_path and os.path.exists(logo_path):
-        safe_logo = "safe_logo" + os.path.splitext(logo_path)[1]
-        os.rename(logo_path, safe_logo)
-        logo_path = safe_logo
-        
-    safe_output = "safe_output" + os.path.splitext(RENAME)[1]
-    output = safe_output
-
+    output = RENAME
     duration = await get_duration(video_path)
     os.makedirs("fonts", exist_ok=True)
     
@@ -196,72 +178,26 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
             cmd.extend(['-vf', f'scale=-2:{target_h}'])
         cmd.extend([
             '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
-            '-max_muxing_queue_size', '4096', '-pix_fmt', 'yuv420p',
             '-progress', 'pipe:1', output
         ])
 
     elif TASK_TYPE == "mux":
         font_args =[]
-
         if os.path.exists("fonts"):
             for idx, f in enumerate(os.listdir("fonts")):
                 fp = os.path.join("fonts", f)
-
-                if not os.path.isfile(fp):
-                    continue
-
+                if not os.path.isfile(fp): continue
                 ext = os.path.splitext(f)[1].lower()
-
-                if ext in ['.ttf', '.ttc']:
-                    mtype = "application/x-truetype-font"
-                elif ext == '.otf':
-                    mtype = "application/vnd.ms-opentype"
-                else:
-                    continue
-
-                font_args.extend([
-                    "-attach", fp,
-                    f"-metadata:s:t:{idx}",
-                    f"mimetype={mtype}"
-                ])
-
-        sub_codec = (
-            'ass'
-            if sub_path and sub_path.lower().endswith('.ass')
-            else 'subrip'
-        )
-
+                mtype = "application/x-truetype-font" if ext in['.ttf', '.ttc'] else "application/vnd.ms-opentype" if ext == '.otf' else ""
+                if mtype: font_args.extend(["-attach", fp, f"-metadata:s:t:{idx}", f"mimetype={mtype}"])
+        
+        sub_codec = 'ass' if (sub_path and sub_path.lower().endswith('.ass')) else 'subrip'
         cmd =[
-            'ffmpeg',
-            '-y',
-
-            '-fflags', '+genpts',
-
-            '-i', video_path,
-            '-i', sub_path,
-
-            '-map', '0:v:0',
-            '-map', '0:a?',
-            '-map', '1:0',
-
-            '-c:v', 'copy',
-            '-c:a', 'copy',
-            '-c:s', sub_codec,
-
-            '-map_metadata', '-1',
-
-            '-avoid_negative_ts', 'make_zero',
-            '-reset_timestamps', '1',
-
-            '-max_muxing_queue_size', '4096',
-
-            '-disposition:s:0', 'default',
-            '-metadata:s:s:0', 'language=eng',
-            '-metadata:s:s:0', 'title=Hinglish'
-        ] + font_args + [
-            '-progress', 'pipe:1',
-            output
-        ]
+            'ffmpeg', '-y', '-i', video_path, '-i', sub_path,
+            '-map', '0:v', '-map', '0:a?', '-map', '1:0',
+            '-c:v', 'copy', '-c:a', 'copy', '-c:s', sub_codec,
+            '-disposition:s:0', 'default', '-metadata:s:s:0', 'language=eng', '-metadata:s:s:0', 'title=Hinglish'
+        ] + font_args +['-progress', 'pipe:1', output]
 
     else:
         target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
@@ -285,8 +221,20 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
 
         if logo_path and LOGO_ID != "none":
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            filter_complex.append(f"[1:v]{current_v}scale2ref=w=rw*0.12:h=ow/mdar[logo][vid]")
-            filter_complex.append(f"[vid][logo]overlay=W-w-10:10[outv]")
+            filter_complex.append(
+    f"[1:v]{current_v}scale2ref="
+    f"w='main_w*0.10':"
+    f"h='ow/mdar':"
+    f"force_original_aspect_ratio=decrease"
+    f"[logo][main]"
+)
+
+filter_complex.append(
+    f"[main][logo]overlay="
+    f"x=main_w-overlay_w-15:"
+    f"y=15"
+    f"[outv]"
+)
             current_v = "[outv]"
 
         cmd =['ffmpeg', '-y', '-i', video_path]
@@ -299,11 +247,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         else:
             cmd.extend(['-map', '0:v', '-map', '0:a?'])
 
-        cmd.extend([
-            '-sn', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', PRESET, 
-            '-crf', CRF, '-c:a', 'aac', '-max_muxing_queue_size', '4096', 
-            '-progress', 'pipe:1', output
-        ])
+        cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-progress', 'pipe:1', output])
 
     proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     start_time = time.time()
@@ -349,13 +293,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
             except: pass
             
     await proc.wait()
-    
-    # 2. RESTORE ORIGINAL NAME AFTER SUCCESS
-    if os.path.exists(safe_output):
-        os.rename(safe_output, RENAME)
-        return RENAME, proc.returncode
-        
-    return RENAME, proc.returncode
+    return output, proc.returncode
 
 async def extract_thumbnail(video_path, thumb_path):
     cmd =['ffmpeg', '-y', '-ss', '00:00:05', '-i', video_path, '-vf', 'scale=320:-1', '-vframes', '1', thumb_path]
