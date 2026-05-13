@@ -255,42 +255,51 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         ]
 
     else:
+        # EXACT OLD REPO LOGIC FOR HARDSUB
         target_h = res_map.get(RESOLUTION, None) if RESOLUTION != "original" else None
-        filter_complex =[]
-        current_v = "[0:v]"
+
+        abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace(':', '\\:') if sub_path else ""
+        fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace(':', '\\:')
+        
+        sub_filter = f"subtitles='{abs_sub}':fontsdir='{fonts_dir}'" if abs_sub else ""
 
         if target_h:
-            filter_complex.append(f"{current_v}scale=-2:{target_h}[scaled]")
-            current_v = "[scaled]"
-
-        if sub_path:
-            abs_sub = os.path.abspath(sub_path).replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
-            fonts_dir = os.path.abspath("fonts").replace('\\', '/').replace("'", r"\'").replace(':', '\\:')
-            has_fonts = any(f.lower().endswith(('.ttf','.otf')) for f in os.listdir("fonts")) if os.path.exists("fonts") else False
-            
-            if has_fonts:
-                filter_complex.append(f"{current_v}subtitles=filename='{abs_sub}':fontsdir='{fonts_dir}'[subbed]")
+            if sub_filter:
+                sub_filter = f"scale=-2:{target_h},{sub_filter}"
             else:
-                filter_complex.append(f"{current_v}subtitles=filename='{abs_sub}'[subbed]")
-            current_v = "[subbed]"
+                sub_filter = f"scale=-2:{target_h}"
 
-        if logo_path and LOGO_ID != "none":
+        if logo_path and LOGO_ID != "none" and os.path.exists(logo_path):
             abs_logo = os.path.abspath(logo_path).replace('\\', '/').replace(':', '\\:')
-            filter_complex.append(f"[1:v]{current_v}scale2ref=w=rw*0.12:h=ow/mdar[logo][vid]")
-            filter_complex.append(f"[vid][logo]overlay=W-w-10:10[outv]")
-            current_v = "[outv]"
+            scale_val = "120:-1"
+            pos_val = "main_w-overlay_w-15:15"
 
-        cmd =['ffmpeg', '-y', '-i', video_path]
-        if logo_path and LOGO_ID != "none":
-            cmd.extend(['-i', abs_logo])
+            if sub_filter:
+                filter_complex = f"[1:v]scale={scale_val}[logo];[0:v]{sub_filter}[subbed];[subbed][logo]overlay={pos_val}[outv]"
+            else:
+                filter_complex = f"[1:v]scale={scale_val}[logo];[0:v][logo]overlay={pos_val}[outv]"
 
-        if filter_complex:
-            cmd.extend(['-filter_complex', ";".join(filter_complex)])
-            cmd.extend(['-map', current_v, '-map', '0:a?'])
+            cmd =[
+                'ffmpeg', '-y', '-i', video_path, '-i', abs_logo,
+                '-filter_complex', filter_complex,
+                '-map', '[outv]', '-map', '0:a?', '-sn',
+                '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
+                '-progress', 'pipe:1', output
+            ]
         else:
-            cmd.extend(['-map', '0:v', '-map', '0:a?'])
-
-        cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'aac', '-progress', 'pipe:1', output])
+            if sub_filter:
+                cmd =[
+                    'ffmpeg', '-y', '-i', video_path, '-sn',
+                    '-vf', sub_filter,
+                    '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
+                    '-progress', 'pipe:1', output
+                ]
+            else:
+                cmd =[
+                    'ffmpeg', '-y', '-i', video_path, '-sn',
+                    '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy',
+                    '-progress', 'pipe:1', output
+                ]
 
     proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     start_time = time.time()
