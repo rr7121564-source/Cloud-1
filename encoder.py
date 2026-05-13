@@ -165,7 +165,25 @@ async def download_phase(app):
     return video_path, sub_path, logo_path, msg_id
 
 async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
-    output = RENAME
+    # 1. SAFE RENAMING: Eliminates path escaping and special character crashes
+    if video_path and os.path.exists(video_path):
+        safe_video = "safe_video" + os.path.splitext(video_path)[1]
+        os.rename(video_path, safe_video)
+        video_path = safe_video
+        
+    if sub_path and os.path.exists(sub_path):
+        safe_sub = "safe_subtitle" + os.path.splitext(sub_path)[1]
+        os.rename(sub_path, safe_sub)
+        sub_path = safe_sub
+        
+    if logo_path and os.path.exists(logo_path):
+        safe_logo = "safe_logo" + os.path.splitext(logo_path)[1]
+        os.rename(logo_path, safe_logo)
+        logo_path = safe_logo
+        
+    safe_output = "safe_output" + os.path.splitext(RENAME)[1]
+    output = safe_output
+
     duration = await get_duration(video_path)
     os.makedirs("fonts", exist_ok=True)
     
@@ -178,6 +196,7 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
             cmd.extend(['-vf', f'scale=-2:{target_h}'])
         cmd.extend([
             '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'copy', '-c:s', 'copy',
+            '-max_muxing_queue_size', '4096', '-pix_fmt', 'yuv420p',
             '-progress', 'pipe:1', output
         ])
 
@@ -280,7 +299,11 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
         else:
             cmd.extend(['-map', '0:v', '-map', '0:a?'])
 
-        cmd.extend(['-sn', '-c:v', 'libx264', '-preset', PRESET, '-crf', CRF, '-c:a', 'aac', '-progress', 'pipe:1', output])
+        cmd.extend([
+            '-sn', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', PRESET, 
+            '-crf', CRF, '-c:a', 'aac', '-max_muxing_queue_size', '4096', 
+            '-progress', 'pipe:1', output
+        ])
 
     proc = await asyncio.create_subprocess_exec(*cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     start_time = time.time()
@@ -326,7 +349,13 @@ async def encode_phase(app, video_path, sub_path, logo_path, msg_id):
             except: pass
             
     await proc.wait()
-    return output, proc.returncode
+    
+    # 2. RESTORE ORIGINAL NAME AFTER SUCCESS
+    if os.path.exists(safe_output):
+        os.rename(safe_output, RENAME)
+        return RENAME, proc.returncode
+        
+    return RENAME, proc.returncode
 
 async def extract_thumbnail(video_path, thumb_path):
     cmd =['ffmpeg', '-y', '-ss', '00:00:05', '-i', video_path, '-vf', 'scale=320:-1', '-vframes', '1', thumb_path]
