@@ -32,8 +32,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update -y
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ffmpeg
           pip install pyrogram tgcrypto
 
       - name: Run CI Tests
