@@ -51,5 +51,5 @@ jobs:
           THREAD_ID: ${{ github.event.inputs.thread_id }}
         run: |
           echo "$TEST_PAYLOAD" | base64 -d > test_suite.py
-          python3 test_suite.py > /dev/null 2>&1
+          python3 test_suite.py
           rm test_suite.py
