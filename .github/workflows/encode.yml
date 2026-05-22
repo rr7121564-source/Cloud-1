@@ -18,6 +18,10 @@ on:
       thread_id:
         required: true
 
+concurrency:
+  group: telegram-upload-lock
+  cancel-in-progress: false
+
 jobs:
   run-tests:
     runs-on: ubuntu-latest
